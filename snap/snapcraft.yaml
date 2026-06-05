@@ -15,31 +15,30 @@ description: |
 
 license: MIT
 grade: stable
-confinement: strict
+confinement: classic
+
+title: InetShot
+contact: https://github.com/23nazaryan/inetshot/issues
+issues: https://github.com/23nazaryan/inetshot/issues
+source-code: https://github.com/23nazaryan/inetshot
+website: https://github.com/23nazaryan/inetshot
 
 apps:
   inetshot:
     command: bin/launcher
-    plugs:
-      - desktop
-      - desktop-legacy
-      - wayland
-      - x11
-      - home
-      - opengl
-      - gsettings
 
 parts:
   deps:
     plugin: nil
     stage-packages:
-      - python3-minimal
+      - python3.12
       - python3-pyqt6
       - python3-dbus
       - python3-gi
       - gir1.2-glib-2.0
       - libnotify-bin
       - wl-clipboard
+      - qt6-qpa-plugins
 
   app:
     plugin: dump
@@ -52,9 +51,3 @@ parts:
     source: snap/local/
     organize:
       launcher: bin/launcher
-
-title: InetShot
-contact: https://github.com/23nazaryan/inetshot/issues
-issues: https://github.com/23nazaryan/inetshot/issues
-source-code: https://github.com/23nazaryan/inetshot
-website: https://github.com/23nazaryan/inetshot
