@@ -11,7 +11,7 @@ description: |
   Copy the result directly to your clipboard or save to a file.
 
   Supports GNOME 46+ on Wayland and X11.
-  Source: https://github.com/YOUR_USERNAME/inetshot
+  Source: https://github.com/your_actual_username/inetshot
 
 license: MIT
 grade: stable
