@@ -17,22 +17,19 @@ license: MIT
 grade: stable
 confinement: strict
 
-# icon is picked up automatically from snap/gui/icon.svg
-
 apps:
   inetshot:
     command: bin/launcher
     plugs:
-      - desktop          # portal access, notifications, theming
-      - desktop-legacy   # dconf, GTK compatibility under xcb
-      - wayland          # Wayland socket (for wl-copy clipboard)
-      - x11              # XWayland — the overlay window runs here
-      - home             # read/write ~/Pictures (portal saves here)
-      - opengl           # Qt6 rendering
-      - gsettings        # read GNOME settings
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - home
+      - opengl
+      - gsettings
 
 parts:
-  # Python runtime + all dependencies from Ubuntu 24.04 apt
   deps:
     plugin: nil
     stage-packages:
@@ -41,22 +38,23 @@ parts:
       - python3-dbus
       - python3-gi
       - gir1.2-glib-2.0
-      - libnotify-bin    # notify-send for desktop notifications
-      - wl-clipboard     # wl-copy for Wayland clipboard
+      - libnotify-bin
+      - wl-clipboard
 
-  # The app itself
   app:
     plugin: dump
     source: .
     prime:
       - inetshot.py
 
-  # Shell launcher (sets PYTHONPATH / QT_QPA_PLATFORM / GI paths)
   launcher:
     plugin: dump
     source: snap/local/
     organize:
       launcher: bin/launcher
-    override-build: |
-      craftctl default
-      chmod +x $CRAFT_PART_INSTALL/bin/launcher
+
+title: InetShot
+contact: https://github.com/23nazaryan/inetshot/issues
+issues: https://github.com/23nazaryan/inetshot/issues
+source-code: https://github.com/23nazaryan/inetshot
+website: https://github.com/23nazaryan/inetshot
