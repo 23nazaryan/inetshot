@@ -1,0 +1,62 @@
+name: inetshot
+base: core24
+version: '0.1.0'
+summary: Lightshot-style screenshot and annotation tool for Linux
+description: |
+  InetShot is a fast, Lightshot-style screenshot and annotation tool
+  for Ubuntu/GNOME.
+
+  Press your hotkey, drag to select a region on screen, then annotate
+  with arrows, freehand pen, rectangles, highlighter, lines, or text.
+  Copy the result directly to your clipboard or save to a file.
+
+  Supports GNOME 46+ on Wayland and X11.
+  Source: https://github.com/YOUR_USERNAME/inetshot
+
+license: MIT
+grade: stable
+confinement: strict
+
+# icon is picked up automatically from snap/gui/icon.svg
+
+apps:
+  inetshot:
+    command: bin/launcher
+    plugs:
+      - desktop          # portal access, notifications, theming
+      - desktop-legacy   # dconf, GTK compatibility under xcb
+      - wayland          # Wayland socket (for wl-copy clipboard)
+      - x11              # XWayland — the overlay window runs here
+      - home             # read/write ~/Pictures (portal saves here)
+      - opengl           # Qt6 rendering
+      - gsettings        # read GNOME settings
+
+parts:
+  # Python runtime + all dependencies from Ubuntu 24.04 apt
+  deps:
+    plugin: nil
+    stage-packages:
+      - python3-minimal
+      - python3-pyqt6
+      - python3-dbus
+      - python3-gi
+      - gir1.2-glib-2.0
+      - libnotify-bin    # notify-send for desktop notifications
+      - wl-clipboard     # wl-copy for Wayland clipboard
+
+  # The app itself
+  app:
+    plugin: dump
+    source: .
+    prime:
+      - inetshot.py
+
+  # Shell launcher (sets PYTHONPATH / QT_QPA_PLATFORM / GI paths)
+  launcher:
+    plugin: dump
+    source: snap/local/
+    organize:
+      launcher: bin/launcher
+    override-build: |
+      craftctl default
+      chmod +x $CRAFT_PART_INSTALL/bin/launcher

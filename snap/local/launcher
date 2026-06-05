@@ -1,0 +1,11 @@
+#!/bin/sh
+# InetShot snap launcher
+# Forces XWayland (xcb) so the overlay can cover the screen.
+# Sets PYTHONPATH / GI typelib paths for stage-packaged Python deps.
+
+export QT_QPA_PLATFORM=xcb
+export PYTHONPATH="$SNAP/usr/lib/python3/dist-packages:$SNAP/usr/lib/python3.12/dist-packages:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="$SNAP/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+export GI_TYPELIB_PATH="$SNAP/usr/lib/x86_64-linux-gnu/girepository-1.0:${GI_TYPELIB_PATH:-}"
+
+exec "$SNAP/usr/bin/python3" "$SNAP/inetshot.py" "$@"
