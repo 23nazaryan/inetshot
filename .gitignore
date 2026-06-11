@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build output
+*.deb
+*.snap
+build-deb-tmp/
+
+# snapcraft working dirs
+parts/
+prime/
+stage/
+overlay/
+.craft/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# OS
+.DS_Store
