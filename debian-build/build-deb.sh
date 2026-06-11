@@ -32,7 +32,7 @@ EOF
 chmod 755 "$STAGE/usr/bin/inetshot"
 
 # --- icon ---
-cp "$ROOT/snap/gui/icon.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/inetshot.svg"
+cp "$ROOT/icon.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/inetshot.svg"
 
 # --- desktop entry ---
 cat > "$STAGE/usr/share/applications/inetshot.desktop" <<EOF
