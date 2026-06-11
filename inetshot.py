@@ -24,8 +24,8 @@ import subprocess
 from datetime import datetime
 from urllib.parse import unquote, urlparse
 
-from PyQt6.QtCore import (Qt, QRect, QPoint, QPointF, QSize, QTimer, QMimeData,
-                          QUrl)
+from PyQt6.QtCore import (Qt, QRect, QPoint, QPointF, QSize, QMimeData, QUrl,
+                          QTimer)
 from PyQt6.QtGui import (
     QGuiApplication, QImage, QPixmap, QPainter, QPen, QBrush, QColor, QFont,
     QPolygonF, QIcon, QFontMetrics, QShortcut, QKeySequence,
@@ -345,6 +345,11 @@ class Toolbar(QFrame):
                 padding: 5px 10px; font-weight: 600;
             }
             QToolButton#copy:hover { background: #dc2626; }
+            QToolButton#copypath {
+                background: #e4e4e7; color: #374151; border-radius: 8px;
+                padding: 5px 10px; font-weight: 600;
+            }
+            QToolButton#copypath:hover { background: #d4d4d8; }
             #sep { color: #d4d4d8; }
         """)
         lay = QHBoxLayout(self)
@@ -418,9 +423,16 @@ class Toolbar(QFrame):
         lay.addWidget(b_save)
 
         b_copy = QToolButton(); b_copy.setObjectName("copy")
-        b_copy.setText("Copy"); b_copy.setToolTip("Copy to clipboard (Ctrl+C)")
+        b_copy.setText("Copy"); b_copy.setToolTip("Copy image to clipboard (Ctrl+C)\nFor browsers, chat apps (Telegram), etc.")
         b_copy.clicked.connect(self.overlay.do_copy)
         lay.addWidget(b_copy)
+
+        b_copypath = QToolButton(); b_copypath.setObjectName("copypath")
+        b_copypath.setText("Copy path")
+        b_copypath.setToolTip("Copy file path as text (Ctrl+Shift+C)\n"
+                              "For terminals — paste into Claude Code, etc.")
+        b_copypath.clicked.connect(self.overlay.do_copy_path)
+        lay.addWidget(b_copypath)
 
         b_close = QToolButton(); b_close.setIcon(_icon(_ic_close)); b_close.setIconSize(QSize(20, 20))
         b_close.setToolTip("Cancel (Esc)"); b_close.clicked.connect(self.overlay.cancel)
@@ -484,6 +496,7 @@ class Overlay(QWidget):
         # shortcuts
         QShortcut(QKeySequence("Escape"), self, activated=self.cancel)
         QShortcut(QKeySequence("Ctrl+C"), self, activated=self.do_copy)
+        QShortcut(QKeySequence("Ctrl+Shift+C"), self, activated=self.do_copy_path)
         QShortcut(QKeySequence("Return"), self, activated=self.do_copy)
         QShortcut(QKeySequence("Enter"), self, activated=self.do_copy)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self.do_save)
@@ -776,36 +789,82 @@ class Overlay(QWidget):
         if shutil.which("notify-send"):
             subprocess.Popen(["notify-send", "-t", "2500", "InetShot", text])
 
-    def do_copy(self):
-        img = self.export_image()
-        if img is None:
-            return
-        # Save a real PNG too, so terminals (Claude Code, etc.) can be handed a
-        # path: they can't accept raw image data, only text.
+    def _save_to_pictures(self, img) -> str | None:
+        """Write the result to ~/Pictures and return its path (or None)."""
         pics = os.path.expanduser("~/Pictures")
         try:
             os.makedirs(pics, exist_ok=True)
             path = os.path.join(
                 pics, "InetShot_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
             img.save(path, "PNG")
+            return path
         except Exception:
-            path = None
+            return None
 
-        # One clipboard entry carrying several representations at once:
-        #   image/png      -> browsers / chat apps paste the image
-        #   text/uri-list  -> file managers paste the file
-        #   text/plain      -> terminals paste the path, which Claude Code loads
+    def do_copy(self):
+        """Copy the IMAGE to the clipboard — for GUI apps (browsers, Telegram…)."""
+        img = self.export_image()
+        if img is None:
+            return
+        path = self._save_to_pictures(img)   # stable file the URI/path point to
+
+        # Carry several representations at once:
+        #   image/png      -> browsers / chat apps (Telegram, …) paste the image
+        #   text/uri-list  -> the file:// URI for file managers
+        #   text/plain     -> the path text
         mime = QMimeData()
         mime.setImageData(img)
         if path:
             mime.setUrls([QUrl.fromLocalFile(path)])
             mime.setText(path)
-        QApplication.clipboard().setMimeData(mime)
+        cb = QApplication.clipboard()
+        cb.setMimeData(mime)
 
-        self._notify("Copied — image + path" if path else "Copied to clipboard")
+        self._notify("Copied image to clipboard")
         self.hide()
-        # Stay alive briefly so the Wayland clipboard manager takes ownership of
-        # all the representations before we exit.
+        # On Wayland (and X11 with no clipboard manager) a clipboard offer dies
+        # with the process that owns it — GNOME only persists text/plain on exit,
+        # dropping the image. So rather than quitting we keep running, invisibly,
+        # holding the offer the way wl-copy / any clipboard manager does, and only
+        # quit once another app takes ownership (e.g. the next copy). connect()
+        # after setMimeData so our own set here doesn't trigger an immediate quit.
+        cb.dataChanged.connect(self.finish)
+
+    def _wl_copy_text(self, text) -> bool:
+        """Put plain text on the Wayland clipboard via wl-copy, which forks a
+        daemon that keeps owning it after we exit. Returns True on success."""
+        if not (os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy")):
+            return False
+        try:
+            p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+            p.communicate(text.encode("utf-8"), timeout=5)
+            return p.returncode == 0
+        except Exception:
+            return False
+
+    def do_copy_path(self):
+        """Copy only the saved file PATH as text — for terminals.
+        JetBrains/PhpStorm terminals refuse to paste when the clipboard holds an
+        image, so this puts text and nothing else: every terminal pastes the
+        path, and Claude Code then loads the existing file as an image."""
+        img = self.export_image()
+        if img is None:
+            return
+        path = self._save_to_pictures(img)
+        if not path:
+            self._notify("Copy path failed (could not save file)")
+            self.finish()
+            return
+        self.hide()        # vanish immediately so the action feels instant
+        self._notify("Copied path: " + os.path.basename(path))
+        if self._wl_copy_text(path):
+            # wl-copy holds the text; safe to exit immediately.
+            self.finish()
+            return
+        # X11 / no-wl-copy fallback: Qt owns the selection, so we must stay alive
+        # briefly for the compositor to take ownership before we quit (quitting
+        # at once drops it and the clipboard reverts to its previous contents).
+        QApplication.clipboard().setText(path)
         QTimer.singleShot(1500, self.finish)
 
     def do_save(self):
