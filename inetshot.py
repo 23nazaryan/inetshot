@@ -16,23 +16,24 @@ Keys:  Esc cancel · Enter or Ctrl+C copy · Ctrl+S save · Ctrl+Z undo
 
 import os
 import sys
+import math
 import time
 import shutil
 import tempfile
 import subprocess
+from datetime import datetime
 from urllib.parse import unquote, urlparse
 
-from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, QPointF, QSize, QBuffer, QIODevice
+from PyQt6.QtCore import (Qt, QRect, QPoint, QPointF, QSize, QTimer, QMimeData,
+                          QUrl)
 from PyQt6.QtGui import (
     QGuiApplication, QImage, QPixmap, QPainter, QPen, QBrush, QColor, QFont,
-    QPolygonF, QIcon, QCursor, QFontMetrics, QShortcut, QKeySequence,
+    QPolygonF, QIcon, QFontMetrics, QShortcut, QKeySequence,
 )
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QToolButton, QButtonGroup, QFileDialog,
-    QLineEdit, QFrame, QLabel,
+    QLineEdit, QFrame,
 )
-
-import math
 
 # ----------------------------------------------------------------------------
 # Config
@@ -195,8 +196,6 @@ def _ic_move(p, s):
     c = s / 2
     p.drawLine(int(c), 3, int(c), s - 3)
     p.drawLine(3, int(c), s - 3, int(c))
-    for (x, y) in [(int(c), 3), (3, int(c)), (s - 3, int(c)), (int(c), s - 3)]:
-        pass
     p.drawLine(int(c), 3, int(c) - 3, 7); p.drawLine(int(c), 3, int(c) + 3, 7)
     p.drawLine(int(c), s - 3, int(c) - 3, s - 7); p.drawLine(int(c), s - 3, int(c) + 3, s - 7)
     p.drawLine(3, int(c), 7, int(c) - 3); p.drawLine(3, int(c), 7, int(c) + 3)
@@ -548,7 +547,7 @@ class Overlay(QWidget):
             if self.tool == "move":
                 p.setBrush(QBrush(QColor("#ffffff")))
                 p.setPen(QPen(QColor("#ff5a36"), 1))
-                for hp in self._handle_points(s):
+                for hp in self._handles(s).values():
                     p.drawRect(hp.x() - 4, hp.y() - 4, 8, 8)
             # size label
             label = f"{s.width()} × {s.height()}"
@@ -565,26 +564,20 @@ class Overlay(QWidget):
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
                        "Drag to select an area   ·   Esc to cancel")
 
-    def _handle_points(self, s: QRect):
+    def _handles(self, s: QRect) -> dict:
+        """The 8 resize anchors (corners + edge midpoints), keyed by name."""
         cx, cy = s.center().x(), s.center().y()
         return {
             "tl": QPoint(s.left(), s.top()), "tr": QPoint(s.right(), s.top()),
             "bl": QPoint(s.left(), s.bottom()), "br": QPoint(s.right(), s.bottom()),
             "t": QPoint(cx, s.top()), "b": QPoint(cx, s.bottom()),
             "l": QPoint(s.left(), cy), "r": QPoint(s.right(), cy),
-        }.values()
+        }
 
     def _hit_handle(self, pos: QPoint):
         if not self.selection:
             return None
-        s = self.selection.normalized()
-        named = {
-            "tl": QPoint(s.left(), s.top()), "tr": QPoint(s.right(), s.top()),
-            "bl": QPoint(s.left(), s.bottom()), "br": QPoint(s.right(), s.bottom()),
-            "t": QPoint(s.center().x(), s.top()), "b": QPoint(s.center().x(), s.bottom()),
-            "l": QPoint(s.left(), s.center().y()), "r": QPoint(s.right(), s.center().y()),
-        }
-        for name, hp in named.items():
+        for name, hp in self._handles(self.selection.normalized()).items():
             if abs(pos.x() - hp.x()) <= HANDLE and abs(pos.y() - hp.y()) <= HANDLE:
                 return name
         return None
@@ -638,7 +631,6 @@ class Overlay(QWidget):
         if self._drag_mode == "move" and self._sel_at_press:
             ns = QRect(self._sel_at_press)
             ns.moveTopLeft(pos - self._drag_off)
-            ns = ns.intersected(self.rect()) if False else ns
             self.selection = self._clamp(ns)
             self.position_toolbar(); self.update(); return
 
@@ -702,13 +694,15 @@ class Overlay(QWidget):
         if r.bottom() > self.height(): r.moveBottom(self.height())
         return r
 
+    MIN_SIZE = 5  # px floor so a selection can't collapse to nothing
+
     def _resize(self, which, pos):
         s = QRect(self._sel_at_press)
         x1, y1, x2, y2 = s.left(), s.top(), s.right(), s.bottom()
-        if "l" in which: x1 = pos.x()
-        if "r" in which: x2 = pos.x()
-        if "t" in which: y1 = pos.y()
-        if "b" in which: y2 = pos.y()
+        if "l" in which: x1 = min(pos.x(), x2 - self.MIN_SIZE)
+        if "r" in which: x2 = max(pos.x(), x1 + self.MIN_SIZE)
+        if "t" in which: y1 = min(pos.y(), y2 - self.MIN_SIZE)
+        if "b" in which: y2 = max(pos.y(), y1 + self.MIN_SIZE)
         self.selection = QRect(QPoint(x1, y1), QPoint(x2, y2)).normalized()
 
     # -- toolbar placement ----------------------------------------------
@@ -786,27 +780,38 @@ class Overlay(QWidget):
         img = self.export_image()
         if img is None:
             return
-        ok = False
-        # Wayland clipboard via wl-copy (most reliable on GNOME Wayland)
-        if shutil.which("wl-copy"):
-            buf = QBuffer(); buf.open(QIODevice.OpenModeFlag.WriteOnly)
-            img.save(buf, "PNG")
-            try:
-                proc = subprocess.Popen(["wl-copy", "--type", "image/png"],
-                                        stdin=subprocess.PIPE)
-                proc.stdin.write(bytes(buf.data())); proc.stdin.close()
-                ok = True
-            except Exception:
-                ok = False
-        QApplication.clipboard().setImage(img)  # X11 / XWayland path
-        self._notify("Copied to clipboard")
-        self.finish()
+        # Save a real PNG too, so terminals (Claude Code, etc.) can be handed a
+        # path: they can't accept raw image data, only text.
+        pics = os.path.expanduser("~/Pictures")
+        try:
+            os.makedirs(pics, exist_ok=True)
+            path = os.path.join(
+                pics, "InetShot_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
+            img.save(path, "PNG")
+        except Exception:
+            path = None
+
+        # One clipboard entry carrying several representations at once:
+        #   image/png      -> browsers / chat apps paste the image
+        #   text/uri-list  -> file managers paste the file
+        #   text/plain      -> terminals paste the path, which Claude Code loads
+        mime = QMimeData()
+        mime.setImageData(img)
+        if path:
+            mime.setUrls([QUrl.fromLocalFile(path)])
+            mime.setText(path)
+        QApplication.clipboard().setMimeData(mime)
+
+        self._notify("Copied — image + path" if path else "Copied to clipboard")
+        self.hide()
+        # Stay alive briefly so the Wayland clipboard manager takes ownership of
+        # all the representations before we exit.
+        QTimer.singleShot(1500, self.finish)
 
     def do_save(self):
         img = self.export_image()
         if img is None:
             return
-        from datetime import datetime
         default = os.path.expanduser(
             "~/Pictures/InetShot_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
         self.hide()
